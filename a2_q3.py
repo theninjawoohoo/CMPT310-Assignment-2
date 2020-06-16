@@ -158,60 +158,20 @@ class my_CSP(search.Problem):
                 if self.nconflicts(var, current[var], current) > 0]
 
 
-# ______________________________________________________________________________
-# Constraint Propagation with AC3
-
-# We only have one constraint, to ensure that these two friends cannot have the same group number
-# Used for the back tracking revision
-def constraints(A, a, B, b):
-    return a != b
-
-
-def my_AC3(csp, queue=None, removals=None, arc_heuristic=dom_j_up):
-    """[Figure 6.3]"""
-    if queue is None:
-        queue = {(Xi, Xk) for Xi in csp.variables for Xk in csp.neighbors[Xi]}
-    csp.support_pruning()
-    queue = arc_heuristic(csp, queue)
-    checks = 0
-    while queue:
-        (Xi, Xj) = queue.pop()
-        revised, checks = my_revise(csp, Xi, Xj, removals, checks)
-        if revised:
-            if not csp.curr_domains[Xi]:
-                return False, checks  # CSP is inconsistent
-            for Xk in csp.neighbors[Xi]:
-                if Xk != Xj:
-                    queue.add((Xk, Xi))
-    return True, checks  # CSP is satisfiable
-
-
-def my_revise(csp, Xi, Xj, removals, checks=0):
-    """Return true if we remove a value."""
-    revised = False
-    for x in csp.curr_domains[Xi][:]:
-        # If Xi=x conflicts with Xj=y for every possible y, eliminate Xi=x
-        # if all(not csp.constraints(Xi, x, Xj, y) for y in csp.curr_domains[Xj]):
-        conflict = True
-        for y in csp.curr_domains[Xj]:
-            if csp.constraints(Xi, x, Xj, y):
-                conflict = False
-            checks += 1
-            if not conflict:
-                break
-        if conflict:
-            csp.prune(Xi, x, removals)
-            revised = True
-    return revised, checks
-
-
+# Let Domain be all possible groups anb individual can join
+# Let the keys in this dict be the people and the values be possible groups
+# We will build the domain from the ground up
+# 1st iteration: each person will be only able to join 1 group.
+# x iteration: each person will be only able to join x groups.
 # A small helper function to populate the domain.
 # group_list = [0]
 # Example output... {0:[0, 1], 1:[0, 1] 2:[0, 1]}
 # This means person 1 2 3 can only join group 0.
-def expandDomain(n, domain, group_list):
-    for i in range(n):
-        domain[i] = group_list
+def expand_domain(group_num, group_list):
+    domains = {}
+    for key in range(group_num):
+        domains.setdefault(key, group_list)
+    return domains
 
 
 # Code borrowed from a2_q2
@@ -233,31 +193,16 @@ def min_number_of_teams(csp_sol):
 def run_q3_one_graph(friend_group):
     # Create the list of variables needed for the CSP
     # Variables = People
-    variable = []
-
-    # Let Domain be all possible groups anb individual can join
-    # Let the keys in this dict be the people and the values be possible groups
-    # We will build the domain from the ground up
-    # 1st iteration: each person will be only able to join 1 group.
-    # x iteration: each person will be only able to join x groups.
-    domain = {}
-
-    # neighbors are the friend group
-    neighbor = friend_group
+    variable = friend_group.keys()
 
     # Recorded variables as requested on the assignment
     number_of_teams = 0
     elapsed_time = 0
     csp_assign = 0
     csp_unassign = 0
+
+    # Saving number of prunes
     number_of_prunes = 0
-
-    # My choice of variable to save
-    number_of_backtracks = 0
-
-    # Every person is a variable
-    for person in friend_group:
-        variable.append(person)
 
     # Algorithm according to course page
     # Throw necessary information into a CSP then apply AC3 to limit the scope of the domain,
@@ -268,51 +213,57 @@ def run_q3_one_graph(friend_group):
     possible_group_domain = []
 
     # print(friend_group)
-
+    solution = None
+    group_dict = None
     # Start timer for algo
     start_time = time.time()
     for group_num in range(len(variable)):
         possible_group_domain.append(group_num)
-        expandDomain((len(variable)), domain, possible_group_domain)
-        # print(domain)
+        domain = expand_domain(len(variable), possible_group_domain)
 
         # We create the csp to cut down on the huge domain scope
-        csp_friend = my_CSP(variable, domain, neighbor, constraints)
-        my_AC3(csp_friend)
+        # https://www.quora.com/What-does-the-arc-consistency-algorithm-AC3-do
+        csp_friend = my_CSP(variable, domain, friend_group, different_values_constraint)
+        AC3(csp_friend)
 
         # From csp.py line 775
-        solution = backtracking_search(csp_friend, select_unassigned_variable=mrv, inference=forward_checking)
+
+        solution = backtracking_search(csp_friend, mrv, lcv, forward_checking)
+        csp_assign += csp_friend.nassigns
+        csp_unassign += csp_friend.uassigns
 
         # Once we find the one possible solution we stop the timer and stop solving the expanding domains
         if solution is not None:
             elapsed_time = time.time() - start_time
-            csp_assign = csp_friend.nassigns
-            csp_unassign = csp_friend.uassigns
             number_of_teams, group_dict = min_number_of_teams(solution)
             number_of_prunes = csp_friend.number_of_prunes
             break
 
     return elapsed_time, csp_assign, csp_unassign, number_of_teams, number_of_prunes, solution, group_dict
 
+
 # Helper function to generate graphs
 def generate_graphs(n, graphs):
     for i in range(n):
         graph = [rand_graph(0.1, 31), rand_graph(0.2, 31), rand_graph(0.3, 31),
-                rand_graph(0.4, 31), rand_graph(0.5, 31), rand_graph(0.6, 31)]
+                 rand_graph(0.4, 31), rand_graph(0.5, 31), rand_graph(0.6, 31)]
         graphs.append(graph)
 
+
 def print_results(graph):
-    elapsed_time, csp_assign, csp_unassign, number_of_teams, number_of_prunes, solution, group_dict = run_q3_one_graph(graph)
+    elapsed_time, csp_assign, csp_unassign, number_of_teams, number_of_prunes, solution, group_dict = run_q3_one_graph(
+        graph)
     print("===========================================================")
     print("Graph: ", graph)
     print("Time Elapsed: ", elapsed_time)
     print("Number of times CSP variables were assigned: ", csp_assign)
     print("Number of times CSP variables were unassigned: ", csp_unassign)
-    print("Min Number of teams needed: ", number_of_teams)
+    print("Aprox Min Number of teams needed: ", number_of_teams)
     print("Number of prunes in CSP: ", number_of_prunes)
     print("Solution: ", solution)
     print("Solution Reformatted: ", group_dict)
     print("===========================================================")
+
 
 def run_q3():
     graphs = []
@@ -331,5 +282,6 @@ def run_q3():
         print_results(graphs[i][4])
         print(f'Trial {i + 1} Running Graph with p:0.6, n:31...')
         print_results(graphs[i][5])
+
 
 run_q3()
